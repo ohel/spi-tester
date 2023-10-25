@@ -1,0 +1,6 @@
+src/wifi_cfg.h
+src/index_html.h
+wifi_cfg.json
+compile_commands.json
+.pio
+.cache

@@ -1,0 +1,42 @@
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+body {
+    background-color: black;
+    color: lightgray;
+    font-family: sans-serif;
+    font-size: 16px;
+}
+h1 {
+    margin-top: 30px;
+}
+textarea {
+    width: 50%;
+    height: 50%;
+}
+button {
+    display: block;
+    margin-top: 16px;
+    padding: 10px;
+}
+</style>
+</head>
+<body>
+    <h1>SPI tester</h1>
+    <p>Write the message to send and press OK.</p>
+    <textarea id="data"></textarea>
+    <button onclick="sendData()">OK</button>
+</body>
+<script>
+const sendData = () => {
+    fetch("/", {
+        method: "POST",
+        body: document.getElementById("data").value,
+        headers: {
+            "Content-type": "application/json; charset=UTF-8"
+        }
+    });
+}
+</script>
+</html>
