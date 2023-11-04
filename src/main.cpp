@@ -8,21 +8,20 @@
 #include "index_html.h"
 
 ESP8266WebServer server(80);
-#define D1MINI_SPI_CS_PIN D3
 
 void sendSPIData(String data) {
-    // MOSI pin = D7/GPIO13 on D1 and D1 mini.
-    // SS pin = D10/GPIO15 on D1.
+    // MOSI pin = GPIO13 = pin D7 on D1/D1 mini.
+    // SCLK pin = GPIO14 = pin D5 on D1/D1 mini.
+    // SS pin = GPIO15 = pin D10 on D1, pin D8 on D1 mini. NB: Boot fails if pulled high.
     digitalWrite(SS, LOW);
-    digitalWrite(D1MINI_SPI_CS_PIN, LOW);
     // 1 MHz clock results in 1 us bit length for nice 1 MHz sampling.
     SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
     for (unsigned int i = 0; i < data.length(); i++) {
         SPI.transfer(data[i]);
     }
+    SPI.transfer('\0');
     SPI.endTransaction();
     digitalWrite(SS, HIGH);
-    digitalWrite(D1MINI_SPI_CS_PIN, HIGH);
 }
 
 void serverGet() {
@@ -59,41 +58,59 @@ void setup() {
     Serial.begin(115200);
     delay(500);
 
-    // Among other SPI pin setup, sets chip select (CS or SS) pin as output and high.
-    // SS is not defined on D1 mini, hence need to setup an alternative pin.
+    // Sets SPI pins to work as main.
     SPI.begin();
-    pinMode(D1MINI_SPI_CS_PIN, OUTPUT);
-    digitalWrite(D1MINI_SPI_CS_PIN, HIGH);
     pinMode(LED_BUILTIN, OUTPUT);
 
     IPAddress subnet(255, 255, 255, 0);
-    WiFi.mode(WIFI_STA);
+    bool is_ap =
+        _WIFI_IP.toString() != INADDR_NONE.toString() &&
+        _WIFI_GATEWAY.toString() == INADDR_NONE.toString();
 
-    Serial.println("");
-    if (_WIFI_IP.toString() == INADDR_NONE.toString()) {
-        Serial.println("Using dynamic IP address.");
+    // Note: here WiFi setup only as AP or STA, not both (WIFI_AP_STA).
+    if (is_ap) {
+        WiFi.mode(WIFI_AP);
+        Serial.println("Setting up AP:");
+        Serial.print("    SSID: ");
+        Serial.println(_WIFI_SSID);
+        Serial.print("    Password: ");
+        if (strlen(_WIFI_PASSWORD) < 8) {
+            Serial.println("");
+            WiFi.softAP(_WIFI_SSID);
+        } else {
+            Serial.println(_WIFI_PASSWORD);
+            WiFi.softAP(_WIFI_SSID, _WIFI_PASSWORD);
+        }
+        Serial.print("    IP/Gateway: ");
+        Serial.println(_WIFI_IP);
+        WiFi.softAPConfig(_WIFI_IP, _WIFI_IP, subnet);
     } else {
-        Serial.print("Using static IP address: ");
-        Serial.println(_WIFI_IP.toString());
-        WiFi.config(_WIFI_IP, _WIFI_GATEWAY, subnet);
+        WiFi.mode(WIFI_STA);
+        if (_WIFI_IP.toString() == INADDR_NONE.toString()) {
+            Serial.println("Using dynamic IP address.");
+        } else {
+            WiFi.config(_WIFI_IP, _WIFI_GATEWAY, subnet);
+        }
     }
 
     WiFi.begin(_WIFI_SSID, _WIFI_PASSWORD);
 
-    int timeout = 0;
-    Serial.print("Connecting to: ");
-    Serial.println(_WIFI_SSID);
-    while (WiFi.status() != WL_CONNECTED && timeout < 10) {
-        delay(1000);
-        Serial.print(".");
-        timeout++;
-    }
-    Serial.println("");
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Unable to connect.");
-    } else {
-        Serial.print("WiFi connected using IP address: ");
-        Serial.println(WiFi.localIP());
+    if (!is_ap) {
+        int timeout = 0;
+        Serial.print("Connecting to: ");
+        Serial.println(_WIFI_SSID);
+        while (WiFi.status() != WL_CONNECTED && timeout < 10) {
+            delay(1000);
+            Serial.print(".");
+            timeout++;
+        }
+        Serial.println("");
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("Unable to connect.");
+        } else {
+            Serial.print("WiFi connected using IP address: ");
+            Serial.println(WiFi.localIP());
+        }
     }
 
     server.on("/", HTTP_GET, serverGet);

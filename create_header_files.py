@@ -40,11 +40,12 @@ def createWifiConfig(cfg_source, cfg_header):
             ssid = config['ssid']
             password = config['password']
             ip = config['ip']
+            is_ap = config['ap']
         else:
             raise Exception('Missing WiFi config.')
 
         # If static IPv4 is set e.g. 192.168.1.4, a gateway of 192.168.1.1 is assumed.
-        gateway = re.sub(r'[0-9]{1,}$', '1', ip).replace('.', ',')
+        gateway = re.sub(r'[0-9]{1,}$', '1', ip).replace('.', ',') if not is_ap else '0,0,0,0'
 
         with open(cfg_header, 'w') as f:
             f.write('const char* _WIFI_SSID = "' + ssid + '";\n')

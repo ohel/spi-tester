@@ -1,5 +1,6 @@
 {
-  "ssid": "wifi",
-  "password": "wifipass",
-  "ip": "0.0.0.0"
+  "ssid": "SPI TEST",
+  "password": "",
+  "ip": "192.168.0.1",
+  "ap": true
 }
