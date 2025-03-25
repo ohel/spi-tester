@@ -9,19 +9,37 @@
 
 ESP8266WebServer server(80);
 
-void sendSPIData(String data) {
-    // MOSI pin = GPIO13 = pin D7 on D1/D1 mini.
-    // SCLK pin = GPIO14 = pin D5 on D1/D1 mini.
-    // SS pin = GPIO15 = pin D10 on D1, pin D8 on D1 mini. NB: Boot fails if pulled high.
-    digitalWrite(SS, LOW);
-    // 1 MHz clock results in 1 us bit length for nice 1 MHz sampling.
-    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
-    for (unsigned int i = 0; i < data.length(); i++) {
-        SPI.transfer(data[i]);
+void sendSPIData(String data, bool onlyNullTerminated) {
+    // The idea is the receiver echoes back what we send here so we can test if both MOSI and MISO work.
+    byte received[data.length() + (onlyNullTerminated ? 1 : 3)];
+    if (!onlyNullTerminated) {
+        data += '\x3'; // end of text
+        data += '\x4'; // end of transmission
     }
-    SPI.transfer('\0');
+    data += '\0';
+
+    digitalWrite(D8, LOW);
+    digitalWrite(D2, HIGH);
+    // Here we would wait for a handshake pin to be ready, but just sleep a millisecond instead.
+    delay(1);
+
+    // 1 MHz clock results in 1 us bit length for nice 1 or 2 MHz sampling.
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+
+    // Skip receiving first byte.
+    for (unsigned int i = 0; i < data.length(); i++) {
+        received[i] = SPI.transfer(data[i]);
+    }
+
     SPI.endTransaction();
-    digitalWrite(SS, HIGH);
+    digitalWrite(D8, HIGH);
+    digitalWrite(D2, LOW);
+
+    // Don't print added control bytes.
+    if (!onlyNullTerminated) received[data.length()-3]='\0';
+
+    Serial.println("Read back the following: ");
+    Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&received[0])));
 }
 
 void serverGet() {
@@ -36,30 +54,37 @@ void serverPost() {
     }
     server.send(200, "text/html", "OK");
     Serial.println("POST with body:");
+
     String body = server.arg("plain");
+    bool onlyNullTerminated = body[0] == '0';
+    body = body.substring(1);
+
+    Serial.print("Is only null terminated string: ");
+    Serial.println(onlyNullTerminated);
+    Serial.println("Sending the following text:");
     Serial.println(body);
 
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(500);
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(250);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(250);
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(250);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(250);
-    sendSPIData(body);
+    sendSPIData(body, onlyNullTerminated);
 }
 
 void setup() {
     Serial.begin(115200);
     delay(500);
 
+    // MOSI pin = GPIO13 = pin D7 on D1/D1 mini.
+    // MISO pin = GPIO12 = pin D6 on D1/D1 mini.
+    // SCK pin = GPIO14 = pin D5 on D1/D1 mini.
+    // SS pin = GPIO15 = pin D10 on D1, pin D8 on D1 mini. NB: Boot fails if pulled high.
+
     // Sets SPI pins to work as main.
+    // It is required to call this! Otherwise SPI.beginTransaction() does _not_ work.
+    // Note: on ESP8266, doesn't seem to set SS high.
+    // Also on ESP8266: SCK, MOSI and MISO pin modes must be SPECIAL and not OUTPUT to work. Otherwise nothing is ever transmitted!
     SPI.begin();
+    pinMode(D8, OUTPUT); // Use D8 instead of SS to pull down CS pin on sub.
+    pinMode(D2, OUTPUT); // Use D2 as D8 complement.
+    digitalWrite(D8, HIGH);
+    digitalWrite(D2, LOW);
     pinMode(LED_BUILTIN, OUTPUT);
 
     IPAddress subnet(255, 255, 255, 0);
@@ -119,8 +144,21 @@ void setup() {
     server.begin();
     Serial.println("Server is running.");
 
-    digitalWrite(LED_BUILTIN, HIGH); delay(250);
-    digitalWrite(LED_BUILTIN, LOW); delay(250);
+    Serial.print("Relevant pins (SS, MOSI, MISO, SCK, D8, D2): ");
+    Serial.print(SS); Serial.print(",");
+    Serial.print(MOSI); Serial.print(",");
+    Serial.print(MISO); Serial.print(",");
+    Serial.print(SCK); Serial.print(",");
+    Serial.print(D8); Serial.print(",");
+    Serial.println(D2);
+    Serial.print("Pin status: ");
+    Serial.print(digitalRead(SS)); Serial.print(",");
+    Serial.print(digitalRead(MOSI)); Serial.print(",");
+    Serial.print(digitalRead(MISO)); Serial.print(",");
+    Serial.print(digitalRead(SCK)); Serial.print(",");
+    Serial.print(digitalRead(D8)); Serial.print(",");
+    Serial.println(digitalRead(D2));
+
     digitalWrite(LED_BUILTIN, HIGH); delay(250);
     digitalWrite(LED_BUILTIN, LOW);
 }
