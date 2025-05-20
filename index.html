@@ -29,17 +29,30 @@ button {
     <p>Write the message to send and press OK. Control bytes are added to the end automatically.</p>
     <textarea id="data"></textarea>
     <button onclick="sendData()">OK</button>
-    <input type="checkbox" id="cb" name="cb">
-    <label for="cb"> Use \0 instead of \x3\x4\0 for end of message.</label>
+    <input type="checkbox" id="cbNull" name="cbNull">
+    <label for="cbNull"> Use \0 instead of \x3\x4\0 for end of message control bytes.</label>
+    <br>
+    <input type="number" id="nRate" name="nRate" min="1000" max="10000000" value="100000">
+    <label for="nRate"> Clock rate in Hz.</label>
+    <br>
+    <input type="checkbox" id="cbLoop" name="cbLoop">
+    <label for="cbLoop"> Use loop to transfer single byte at a time.</label>
+    <br>
+    <input type="number" id="nDelay" name="nDelay" min="0" max="1000" value="0">
+    <label for="nDelay"> Delay for loop transfer, in ms.</label>
 </body>
 <script>
 const sendData = () => {
-    const eotChar = document.getElementById("cb").checked ? 0 : 1;
+    const useNull = document.getElementById("cbNull").checked ? 1 : 0;
+    const useLoop = document.getElementById("cbLoop").checked ? 1 : 0;
+    const rate = document.getElementById("nRate").value;
+    const delay = document.getElementById("nDelay").value;
+    const data = document.getElementById("data").value;
     fetch("/", {
         method: "POST",
-        body: eotChar.toString() + document.getElementById("data").value,
+        body: `${useNull},${rate},${useLoop},${delay}:${data}`,
         headers: {
-            "Content-type": "application/json; charset=UTF-8"
+            "Content-type": "text/plain; charset=UTF-8"
         }
     });
 }

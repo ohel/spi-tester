@@ -9,26 +9,56 @@
 
 ESP8266WebServer server(80);
 
-void sendSPIData(String data, bool onlyNullTerminated) {
+void sendSPIData(String data,
+        bool useNull = false,
+        bool useLoop = false,
+        ulong rate = 100000,
+        uint msDelay = 0
+    ) {
     // The idea is the receiver echoes back what we send here so we can test if both MOSI and MISO work.
-    byte received[data.length() + (onlyNullTerminated ? 1 : 3)];
-    if (!onlyNullTerminated) {
+    byte received[data.length() + (useNull ? 1 : 3)];
+    if (!useNull) {
         data += '\x3'; // end of text
         data += '\x4'; // end of transmission
     }
     data += '\0';
 
+    if (useLoop) {
+        Serial.print("Using loop with delay ");
+        Serial.print(msDelay);
+        Serial.print(" to send");
+    } else {
+        Serial.print("Sending");
+    }
+    Serial.print(" the following text with length ");
+    Serial.print(data.length());
+    Serial.println(" bytes:");
+    Serial.println(data);
+
+    Serial.print("Using clock rate: ");
+    Serial.println(rate);
+
+    byte sendBuffer[data.length()];
+    data.getBytes(sendBuffer, data.length());
+
     digitalWrite(D8, LOW);
     digitalWrite(D2, HIGH);
-    // Here we would wait for a handshake pin to be ready, but just sleep a millisecond instead.
+    // Here we would wait for a possible handshake pin to be ready, but just sleep a millisecond instead.
     delay(1);
 
     // 1 MHz clock results in 1 us bit length for nice 1 or 2 MHz sampling.
-    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+    // A 100 kHz clock works better with bad wiring.
+    SPI.beginTransaction(SPISettings(rate, MSBFIRST, SPI_MODE0));
 
-    // Skip receiving first byte.
-    for (unsigned int i = 0; i < data.length(); i++) {
-        received[i] = SPI.transfer(data[i]);
+    // This is for testing if some delay between bytes is required.
+    // If using transferBytes, the answer might just be what was received for slow ISR routines.
+    if (useLoop) {
+        for (unsigned int i = 0; i < sizeof(sendBuffer); i++) {
+            received[i] = SPI.transfer(sendBuffer[i]);
+            if (msDelay > 0) delayMicroseconds(msDelay);
+        }
+    } else {
+        SPI.transferBytes(sendBuffer, received, sizeof(sendBuffer));
     }
 
     SPI.endTransaction();
@@ -36,10 +66,11 @@ void sendSPIData(String data, bool onlyNullTerminated) {
     digitalWrite(D2, LOW);
 
     // Don't print added control bytes.
-    if (!onlyNullTerminated) received[data.length()-3]='\0';
+    if (!useNull) received[data.length()-2]='\0';
 
-    Serial.println("Read back the following: ");
-    Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&received[0])));
+    // Skip first byte as that's just noise.
+    Serial.println("Read back the following, trimmed of control bytes:");
+    Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&received[1])));
 }
 
 void serverGet() {
@@ -54,17 +85,31 @@ void serverPost() {
     }
     server.send(200, "text/html", "OK");
     Serial.println("POST with body:");
-
     String body = server.arg("plain");
-    bool onlyNullTerminated = body[0] == '0';
-    body = body.substring(1);
-
-    Serial.print("Is only null terminated string: ");
-    Serial.println(onlyNullTerminated);
-    Serial.println("Sending the following text:");
     Serial.println(body);
 
-    sendSPIData(body, onlyNullTerminated);
+    // Comma separates configuration parameters, colon the data.
+    uint colonIndex = body.indexOf(':');
+    const String data = body.substring(colonIndex+1);
+    body = body.substring(0, colonIndex);
+
+    // Order of configuration parameters:
+    // control byte, clock, use loop, delay for loop
+    uint commaIndex = body.indexOf(',');
+    bool useNull = body.substring(0, commaIndex)[0] == '1';
+    body = body.substring(commaIndex+1);
+    commaIndex = body.indexOf(',');
+
+    ulong rate = body.substring(0, commaIndex).toInt();
+    body = body.substring(commaIndex+1);
+    commaIndex = body.indexOf(',');
+
+    bool useLoop = body.substring(0, commaIndex)[0] == '1';
+    body = body.substring(commaIndex+1);
+
+    ulong msDelay = body.toInt();
+
+    sendSPIData(data, useNull, useLoop, rate, msDelay);
 }
 
 void setup() {
