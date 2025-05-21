@@ -48,14 +48,19 @@ button {
     <label for="cbLoop"> Use loop to transfer single byte at a time.</label>
     <br>
     <input type="number" id="nDelay" name="nDelay" min="0" max="1000" value="0">
-    <label for="nDelay"> Delay for loop transfer, in ms.</label>
+    <label for="nDelay"> Delay for loop transfer, in µs.</label>
+    <br>
+    <input type="checkbox" id="cbErrors" name="cbErrors" onclick="setCheckErrors()">
+    <label for="cbErrors"> Error checking.</label>
 </body>
 <script>
 const selectSend = () => {
     const e = document.getElementById("sendData");
     e.style.display = "block";
-    document.getElementById("cbLoop").checked = false;
-    document.getElementById("cbLoop").disabled = false;
+    if (!document.getElementById("cbErrors").checked) {
+        document.getElementById("cbLoop").checked = false;
+        document.getElementById("cbLoop").disabled = false;
+    }
 }
 
 const selectReceive = () => {
@@ -65,16 +70,27 @@ const selectReceive = () => {
     document.getElementById("cbLoop").disabled = true;
 }
 
+const setCheckErrors = () => {
+    if (document.getElementById("cbErrors").checked) {
+        document.getElementById("cbLoop").checked = true;
+        document.getElementById("cbLoop").disabled = true;
+    } else if (document.getElementById("rbSend").checked) {
+        document.getElementById("cbLoop").checked = false;
+        document.getElementById("cbLoop").disabled = false;
+    }
+}
+
 const submit = () => {
     const isSending = document.getElementById("rbSend").checked ? 1 : 0;
     const useNull = document.getElementById("cbNull").checked ? 1 : 0;
     const useLoop = document.getElementById("cbLoop").checked ? 1 : 0;
+    const checkErrors = document.getElementById("cbErrors").checked ? 1 : 0;
     const rate = document.getElementById("nRate").value;
     const delay = document.getElementById("nDelay").value;
     const data = document.getElementById("data").value;
     fetch("/", {
         method: "POST",
-        body: `${isSending},${useNull},${rate},${useLoop},${delay}:${data}`,
+        body: `${isSending},${useNull},${rate},${useLoop},${delay},${checkErrors}:${data}`,
         headers: {
             "Content-type": "text/plain; charset=UTF-8"
         }

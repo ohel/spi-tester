@@ -9,38 +9,43 @@
 
 ESP8266WebServer server(80);
 const uint maxBufferSize = 1000;
+const uint maxErrorCount = 100;
 
 #define END_OF_TEXT '\x3'
 #define END_OF_TRANSMISSION '\x4'
+#define BACKSPACE '\b'
+#define NULL_BYTE '\0'
 
 // 1 MHz clock results in 1 us bit length for nice 1 or 2 MHz sampling.
 // A 100 kHz clock is less error-prone and works better with bad wires.
-void transferSPIData(String data,
-        bool isSending = true,
-        bool useNull = false,
-        bool useLoop = false,
-        ulong rate = 100000,
-        uint msDelay = 0
-    ) {
+void transferSPIData(
+    String data,
+    bool isSending = true,
+    bool useNull = false,
+    bool useLoop = false,
+    ulong rate = 100000,
+    uint usDelay = 0,
+    bool checkErrors = false) {
 
     if (!useNull) {
         data += END_OF_TEXT;
         data += END_OF_TRANSMISSION;
     }
-    data += '\0';
 
-    byte receiveBuffer[isSending ? data.length() : maxBufferSize];
+    byte receiveBuffer[isSending ? data.length() + 1 : maxBufferSize];
+    receiveBuffer[sizeof(receiveBuffer) - 1] = NULL_BYTE;
 
     if (useLoop) {
-        Serial.print("Using loop with delay ");
-        Serial.print(msDelay);
-        Serial.print(" to transfer");
-        if (!isSending) Serial.print(" and echo back");
+        Serial.print("Using loop, delay ");
+        Serial.print(usDelay);
+        Serial.print("µs, transfer");
+        if (!isSending) Serial.print(" (receive)");
+        if (checkErrors) Serial.print(" with error checking");
     } else {
         Serial.print("Transferring");
     }
     if (isSending) {
-        Serial.print(" the following text with length ");
+        Serial.print(", ");
         Serial.print(data.length());
         Serial.println(" bytes:");
         Serial.println(data);
@@ -52,12 +57,14 @@ void transferSPIData(String data,
     Serial.println(rate);
 
     byte sendBuffer[sizeof(receiveBuffer)];
-    sendBuffer[0] = '\0';
-    if (isSending) data.getBytes(sendBuffer, data.length());
+    if (isSending) data.getBytes(sendBuffer, data.length() + 1); // Account for the null byte.
+    sendBuffer[sizeof(sendBuffer) - 1] = NULL_BYTE;
 
-    bool echoBack = !isSending;
-    uint_fast8_t controlEndBytesToGo = useNull ? 1 : 3;
+    bool receiving = !isSending;
+    uint_fast8_t controlEndBytesToGo = 2;
+    uint_fast8_t errorCount = 0;
     uint receivedDataSize = sizeof(receiveBuffer);
+    uint maxIndex = sizeof(sendBuffer) - (receiving ? 1 : 0);
 
     digitalWrite(D8, LOW);
     digitalWrite(D2, HIGH);
@@ -67,22 +74,69 @@ void transferSPIData(String data,
     // This is for testing if some delay between bytes is required.
     // If using transferBytes, the echoed back data might just be what was received for slow ISR routines.
     if (useLoop) {
-        for (uint i = 0; i < sizeof(sendBuffer); i++) {
-            receiveBuffer[i] = SPI.transfer(sendBuffer[i]);
 
-            if (echoBack) {
-                sendBuffer[i+1] = receiveBuffer[i];
-                if (i == maxBufferSize - 2) echoBack = false; // Don't try to echo back beyond buffer size.
-                if (receiveBuffer[i] == END_OF_TEXT && controlEndBytesToGo == 3) controlEndBytesToGo = 2;
-                if (receiveBuffer[i] == END_OF_TRANSMISSION && controlEndBytesToGo == 2) controlEndBytesToGo = 1;
-                if (receiveBuffer[i] == '\0' && controlEndBytesToGo == 1) {
+        // The first byte is expected to be just noise if receiving,
+        // since master (this end) always initiates transfer anyway.
+        // Also effectively ignores the first byte on error checking.
+        if (receiving) sendBuffer[0] = NULL_BYTE;
+        receiveBuffer[0] = SPI.transfer(sendBuffer[0]);
+        byte lastSentByte = sendBuffer[0];
+        if (receiving) sendBuffer[1] = receiveBuffer[0];
+
+        if (usDelay > 0) delayMicroseconds(usDelay);
+        bool error = false;
+
+        for (uint i = 1; i < maxIndex; i++) {
+
+            if (error) {
+                Serial.println("Sending BACKSPACE");
+                receiveBuffer[i] = SPI.transfer(BACKSPACE);
+                if (isSending) i -= 1;
+                error = false;
+                errorCount++;
+                if (errorCount > maxErrorCount) break;
+                if (usDelay > 0) delayMicroseconds(usDelay);
+                lastSentByte = BACKSPACE;
+                continue;
+            } else {
+                receiveBuffer[i] = SPI.transfer(sendBuffer[i]);
+            }
+
+            if (receiving) {
+                sendBuffer[i+1] = receiveBuffer[i]; // Echoes back bytes next round.
+
+                // Will result in BACKSPACE echoed next round and buffer rolled back.
+                if (checkErrors && receiveBuffer[i] == BACKSPACE) {
+                    Serial.println("Received BACKSPACE");
+                    error = true;
+                    i -= 2;
+                } else if (receiveBuffer[i] == NULL_BYTE && useNull) {
+                    receivedDataSize = i;
+                    Serial.print("Null byte received, total byte count: ");
+                    Serial.println(receivedDataSize);
+                    i = maxBufferSize; // End loop.
+                } else if (receiveBuffer[i] == END_OF_TEXT && controlEndBytesToGo == 2) {
+                    controlEndBytesToGo = 1;
+                } else if (receiveBuffer[i] == END_OF_TRANSMISSION && controlEndBytesToGo == 1) {
                     receivedDataSize = i+1;
                     Serial.print("End control bytes received, total byte count: ");
                     Serial.println(receivedDataSize);
-                    i = maxBufferSize; // End loop.
+                    sendBuffer[maxIndex - 1] = END_OF_TRANSMISSION; // Final echo back.
+                    i = maxIndex - 2; // End loop after next byte.
                 }
+            } else if (checkErrors) {
+                // On send, if last sent byte was not echoed correctly, send a BACKSPACE and roll back buffers.
+                bool anotherError = lastSentByte != receiveBuffer[i];
+                if (error && anotherError) {
+                    Serial.println("Consecutive errors reached. Abort.");
+                    break;
+                }
+                error = anotherError;
+                if (error || receiveBuffer[i] == BACKSPACE) i--;
             }
-            if (msDelay > 0) delayMicroseconds(msDelay);
+
+            lastSentByte = sendBuffer[i];
+            if (usDelay > 0) delayMicroseconds(usDelay);
         }
     } else {
         SPI.transferBytes(sendBuffer, receiveBuffer, sizeof(sendBuffer));
@@ -92,12 +146,17 @@ void transferSPIData(String data,
     digitalWrite(D8, HIGH);
     digitalWrite(D2, LOW);
 
-    // Don't print added control bytes. On send, we don't account for the sent null byte.
-    if (!useNull) receiveBuffer[receivedDataSize-(isSending ? 2 : 3)] = '\0';
+    if (errorCount > maxErrorCount) {
+        Serial.println("Max error count was reached. Received:");
+        Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&receiveBuffer[1])));
+    } else {
+        // Don't print added control bytes.
+        if (!useNull) receiveBuffer[receivedDataSize - 2] = NULL_BYTE;
 
-    // Skip first byte as that's just noise.
-    Serial.println("Received the following, trimmed of control bytes:");
-    Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&receiveBuffer[1])));
+        // Skip first byte as that's just noise.
+        Serial.println("Trimmed of noise and control bytes, received:");
+        Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&receiveBuffer[1])));
+    }
 }
 
 void serverGet() {
@@ -121,7 +180,7 @@ void serverPost() {
     body = body.substring(0, colonIndex);
 
     // Order of configuration parameters:
-    // is sending, control byte, clock, use loop, delay for loop
+    // is sending, control byte, clock, use loop, delay for loop, check for errors
     uint commaIndex = body.indexOf(',');
     bool isSending = body.substring(0, commaIndex)[0] == '1';
     body = body.substring(commaIndex+1);
@@ -137,10 +196,13 @@ void serverPost() {
 
     bool useLoop = body.substring(0, commaIndex)[0] == '1';
     body = body.substring(commaIndex+1);
+    commaIndex = body.indexOf(',');
 
-    ulong msDelay = body.toInt();
+    ulong usDelay = body.substring(0, commaIndex).toInt();
+    body = body.substring(commaIndex+1);
+    bool checkErrors = body[0] == '1';
 
-    transferSPIData(data, isSending, useNull, useLoop, rate, msDelay);
+    transferSPIData(data, isSending, useNull, useLoop, rate, usDelay, checkErrors);
 }
 
 void setup() {
