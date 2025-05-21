@@ -8,69 +8,96 @@
 #include "index_html.h"
 
 ESP8266WebServer server(80);
+const uint maxBufferSize = 1000;
 
-void sendSPIData(String data,
+#define END_OF_TEXT '\x3'
+#define END_OF_TRANSMISSION '\x4'
+
+// 1 MHz clock results in 1 us bit length for nice 1 or 2 MHz sampling.
+// A 100 kHz clock is less error-prone and works better with bad wires.
+void transferSPIData(String data,
+        bool isSending = true,
         bool useNull = false,
         bool useLoop = false,
         ulong rate = 100000,
         uint msDelay = 0
     ) {
-    // The idea is the receiver echoes back what we send here so we can test if both MOSI and MISO work.
-    byte received[data.length() + (useNull ? 1 : 3)];
+
     if (!useNull) {
-        data += '\x3'; // end of text
-        data += '\x4'; // end of transmission
+        data += END_OF_TEXT;
+        data += END_OF_TRANSMISSION;
     }
     data += '\0';
+
+    byte receiveBuffer[isSending ? data.length() : maxBufferSize];
 
     if (useLoop) {
         Serial.print("Using loop with delay ");
         Serial.print(msDelay);
-        Serial.print(" to send");
+        Serial.print(" to transfer");
+        if (!isSending) Serial.print(" and echo back");
     } else {
-        Serial.print("Sending");
+        Serial.print("Transferring");
     }
-    Serial.print(" the following text with length ");
-    Serial.print(data.length());
-    Serial.println(" bytes:");
-    Serial.println(data);
+    if (isSending) {
+        Serial.print(" the following text with length ");
+        Serial.print(data.length());
+        Serial.println(" bytes:");
+        Serial.println(data);
+    } else {
+        Serial.println(" bytes.");
+    }
 
     Serial.print("Using clock rate: ");
     Serial.println(rate);
 
-    byte sendBuffer[data.length()];
-    data.getBytes(sendBuffer, data.length());
+    byte sendBuffer[sizeof(receiveBuffer)];
+    sendBuffer[0] = '\0';
+    if (isSending) data.getBytes(sendBuffer, data.length());
+
+    bool echoBack = !isSending;
+    uint_fast8_t controlEndBytesToGo = useNull ? 1 : 3;
+    uint receivedDataSize = sizeof(receiveBuffer);
 
     digitalWrite(D8, LOW);
     digitalWrite(D2, HIGH);
-    // Here we would wait for a possible handshake pin to be ready, but just sleep a millisecond instead.
-    delay(1);
 
-    // 1 MHz clock results in 1 us bit length for nice 1 or 2 MHz sampling.
-    // A 100 kHz clock works better with bad wiring.
     SPI.beginTransaction(SPISettings(rate, MSBFIRST, SPI_MODE0));
 
     // This is for testing if some delay between bytes is required.
-    // If using transferBytes, the answer might just be what was received for slow ISR routines.
+    // If using transferBytes, the echoed back data might just be what was received for slow ISR routines.
     if (useLoop) {
-        for (unsigned int i = 0; i < sizeof(sendBuffer); i++) {
-            received[i] = SPI.transfer(sendBuffer[i]);
+        for (uint i = 0; i < sizeof(sendBuffer); i++) {
+            receiveBuffer[i] = SPI.transfer(sendBuffer[i]);
+
+            if (echoBack) {
+                sendBuffer[i+1] = receiveBuffer[i];
+                if (i == maxBufferSize - 2) echoBack = false; // Don't try to echo back beyond buffer size.
+                if (receiveBuffer[i] == END_OF_TEXT && controlEndBytesToGo == 3) controlEndBytesToGo = 2;
+                if (receiveBuffer[i] == END_OF_TRANSMISSION && controlEndBytesToGo == 2) controlEndBytesToGo = 1;
+                if (receiveBuffer[i] == '\0' && controlEndBytesToGo == 1) {
+                    receivedDataSize = i+1;
+                    Serial.print("End control bytes received, total byte count: ");
+                    Serial.println(receivedDataSize);
+                    i = maxBufferSize; // End loop.
+                }
+            }
             if (msDelay > 0) delayMicroseconds(msDelay);
         }
     } else {
-        SPI.transferBytes(sendBuffer, received, sizeof(sendBuffer));
+        SPI.transferBytes(sendBuffer, receiveBuffer, sizeof(sendBuffer));
     }
 
     SPI.endTransaction();
     digitalWrite(D8, HIGH);
     digitalWrite(D2, LOW);
 
-    // Don't print added control bytes.
-    if (!useNull) received[data.length()-2]='\0';
+    // Don't print added control bytes. On send, we don't account for the sent null byte.
+    if (!useNull) receiveBuffer[receivedDataSize-(isSending ? 2 : 3)] = '\0';
 
     // Skip first byte as that's just noise.
-    Serial.println("Read back the following, trimmed of control bytes:");
-    Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&received[1])));
+    Serial.println("Received the following, trimmed of control bytes:");
+    Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&receiveBuffer[1])));
 }
 
 void serverGet() {
@@ -94,8 +121,12 @@ void serverPost() {
     body = body.substring(0, colonIndex);
 
     // Order of configuration parameters:
-    // control byte, clock, use loop, delay for loop
+    // is sending, control byte, clock, use loop, delay for loop
     uint commaIndex = body.indexOf(',');
+    bool isSending = body.substring(0, commaIndex)[0] == '1';
+    body = body.substring(commaIndex+1);
+    commaIndex = body.indexOf(',');
+
     bool useNull = body.substring(0, commaIndex)[0] == '1';
     body = body.substring(commaIndex+1);
     commaIndex = body.indexOf(',');
@@ -109,7 +140,7 @@ void serverPost() {
 
     ulong msDelay = body.toInt();
 
-    sendSPIData(data, useNull, useLoop, rate, msDelay);
+    transferSPIData(data, isSending, useNull, useLoop, rate, msDelay);
 }
 
 void setup() {

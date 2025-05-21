@@ -26,9 +26,18 @@ button {
 </head>
 <body>
     <h1>SPI tester</h1>
-    <p>Write the message to send and press OK. Control bytes are added to the end automatically.</p>
-    <textarea id="data"></textarea>
-    <button onclick="sendData()">OK</button>
+    <input type="radio" id="rbSend" name="direction" value="Send" checked onclick="selectSend()">
+    <label for="rbSend">Send</label><br>
+    <input type="radio" id="rbReceive" name="direction" value="Receive" onclick="selectReceive()">
+    <label for="rbReceive">Receive (and echo back until end of message control bytes received, max 1000 bytes)</label><br>
+    <br>
+
+    <div id="sendData">
+        <p>Write the message to send and press OK. Control bytes are added to the end automatically.</p>
+        <textarea id="data"></textarea>
+    </div>
+    <button onclick="submit()">OK</button>
+
     <input type="checkbox" id="cbNull" name="cbNull">
     <label for="cbNull"> Use \0 instead of \x3\x4\0 for end of message control bytes.</label>
     <br>
@@ -42,7 +51,22 @@ button {
     <label for="nDelay"> Delay for loop transfer, in ms.</label>
 </body>
 <script>
-const sendData = () => {
+const selectSend = () => {
+    const e = document.getElementById("sendData");
+    e.style.display = "block";
+    document.getElementById("cbLoop").checked = false;
+    document.getElementById("cbLoop").disabled = false;
+}
+
+const selectReceive = () => {
+    const e = document.getElementById("sendData");
+    e.style.display = "none";
+    document.getElementById("cbLoop").checked = true;
+    document.getElementById("cbLoop").disabled = true;
+}
+
+const submit = () => {
+    const isSending = document.getElementById("rbSend").checked ? 1 : 0;
     const useNull = document.getElementById("cbNull").checked ? 1 : 0;
     const useLoop = document.getElementById("cbLoop").checked ? 1 : 0;
     const rate = document.getElementById("nRate").value;
@@ -50,7 +74,7 @@ const sendData = () => {
     const data = document.getElementById("data").value;
     fetch("/", {
         method: "POST",
-        body: `${useNull},${rate},${useLoop},${delay}:${data}`,
+        body: `${isSending},${useNull},${rate},${useLoop},${delay}:${data}`,
         headers: {
             "Content-type": "text/plain; charset=UTF-8"
         }
