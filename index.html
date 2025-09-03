@@ -52,6 +52,9 @@ button {
     <br>
     <input type="checkbox" id="cbErrors" name="cbErrors" onclick="setCheckErrors()">
     <label for="cbErrors"> Error checking.</label>
+    <br>
+    <input type="checkbox" id="cbLeading" name="cbErrors" onclick="setLeadingNulls()">
+    <label for="cbLeading"> Leading nulls on send.</label>
 </body>
 <script>
 const selectSend = () => {
@@ -85,12 +88,13 @@ const submit = () => {
     const useNull = document.getElementById("cbNull").checked ? 1 : 0;
     const useLoop = document.getElementById("cbLoop").checked ? 1 : 0;
     const checkErrors = document.getElementById("cbErrors").checked ? 1 : 0;
+    const leadingNulls = document.getElementById("cbLeading").checked ? 1 : 0;
     const rate = document.getElementById("nRate").value;
     const delay = document.getElementById("nDelay").value;
     const data = document.getElementById("data").value;
     fetch("/", {
         method: "POST",
-        body: `${isSending},${useNull},${rate},${useLoop},${delay},${checkErrors}:${data}`,
+        body: `${isSending},${useNull},${rate},${useLoop},${delay},${checkErrors},${leadingNulls}:${data}`,
         headers: {
             "Content-type": "text/plain; charset=UTF-8"
         }
