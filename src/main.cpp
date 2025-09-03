@@ -28,7 +28,7 @@ inline void verboseLog(String msg) {
 void transferSPIData(
     String data,
     bool isSending = true,
-    bool useNull = false,
+    bool useNull = true,
     bool useLoop = false,
     ulong rate = 100000,
     uint usDelay = 0,
@@ -41,8 +41,8 @@ void transferSPIData(
         data += END_OF_TRANSMISSION;
     }
 
-    // Account for null byte at the end.
-    byte receiveBuffer[isSending ? (data.length() + 1) : maxBufferSize];
+    // Account for null byte at the end and the first noise byte.
+    byte receiveBuffer[isSending ? (data.length() + 2) : maxBufferSize];
     receiveBuffer[sizeof(receiveBuffer) - 1] = NULL_BYTE;
 
     if (useLoop) {
@@ -61,14 +61,12 @@ void transferSPIData(
 
     Serial.println("Using clock rate: " + String(rate));
 
-    byte sendBuffer[sizeof(receiveBuffer)];
+    byte sendBuffer[sizeof(receiveBuffer) - 1];
     if (isSending) data.getBytes(sendBuffer, sizeof(receiveBuffer));
     sendBuffer[sizeof(sendBuffer) - 1] = NULL_BYTE;
 
     bool receiving = !isSending;
-    uint_fast8_t controlEndBytesToGo = 2;
     uint_fast8_t errorCount = 0;
-    uint receivedDataSize = sizeof(receiveBuffer);
     uint maxIndex = sizeof(sendBuffer) - (receiving ? 1 : 0);
 
     digitalWrite(D8, LOW);
@@ -95,9 +93,7 @@ void transferSPIData(
         receiveBuffer[0] = SPI.transfer(sendBuffer[0]);
         verboseLog("Sent: " + String(char(sendBuffer[0])));
         byte lastSentByte = sendBuffer[0];
-
-        // Send the received byte back on next round.
-        if (receiving) sendBuffer[1] = receiveBuffer[0];
+        byte lastReceivedByte = receiveBuffer[0];
 
         if (usDelay > 0) delayMicroseconds(usDelay);
         bool error = false;
@@ -105,53 +101,46 @@ void transferSPIData(
         for (uint i = 1; i < maxIndex; i++) {
 
             if (error) {
-                verboseLog("Sent: BACKSPACE");
                 receiveBuffer[i] = SPI.transfer(BACKSPACE);
-                if (isSending) i -= 1;
+                lastReceivedByte = receiveBuffer[i];
+                verboseLog("Sent: B, rec: " + String(char((lastReceivedByte == BACKSPACE) ? 'B' : lastReceivedByte)));
+                lastSentByte = BACKSPACE;
+                i -= receiveBuffer[i] == BACKSPACE ? 2 : 1; // Roll back two positions if consecutive error.
                 error = false;
                 errorCount++;
                 if (errorCount > maxErrorCount) break;
-                lastSentByte = BACKSPACE;
                 if (usDelay > 0) delayMicroseconds(usDelay);
                 continue;
             } else {
-                byte byteToSend = sendBuffer[lastSentByte == BACKSPACE ? i-1 : i];
+                byte byteToSend = receiving ? lastReceivedByte : sendBuffer[lastSentByte == BACKSPACE ? i-1 : i];
                 if (generateErrors && (random(5) == 0)) byteToSend = BELL;
                 receiveBuffer[i] = SPI.transfer(byteToSend);
-                verboseLog("Sent: " + String(char(byteToSend)));
+                lastReceivedByte = receiveBuffer[i];
+                verboseLog("Sent: " + String(char(byteToSend == BACKSPACE ? 'B' : byteToSend)) + ", rec: " + String(char((receiveBuffer[i] == BACKSPACE) ? 'B' : lastReceivedByte)));
+                if (usDelay > 0) delayMicroseconds(usDelay);
             }
 
             if (receiving) {
-                sendBuffer[i+1] = receiveBuffer[i]; // Echoes back bytes next round.
-
-                // Will result in BACKSPACE echoed next round and buffer rolled back.
-                if (checkErrors && receiveBuffer[i] == BACKSPACE) {
-                    verboseLog("Received BACKSPACE");
+                if (checkErrors && (receiveBuffer[i] == BACKSPACE)) {
                     error = true;
                     i -= 2;
-                } else if (receiveBuffer[i] == NULL_BYTE && useNull) {
-                    receivedDataSize = i;
-                    verboseLog("Null byte received, total byte count: " + String(receivedDataSize));
+                } else if (useNull && (receiveBuffer[i] == NULL_BYTE)) {
                     i = maxBufferSize; // End loop.
-                } else if (receiveBuffer[i] == END_OF_TEXT && controlEndBytesToGo == 2) {
-                    controlEndBytesToGo = 1;
-                } else if (receiveBuffer[i] == END_OF_TRANSMISSION && controlEndBytesToGo == 1) {
-                    receivedDataSize = i+1;
-                    verboseLog("End control bytes received, total byte count: " + String(receivedDataSize));
-                    sendBuffer[maxIndex - 1] = END_OF_TRANSMISSION; // Final echo back.
+                } else if ((receiveBuffer[i] == END_OF_TRANSMISSION) && (receiveBuffer[i-1] == END_OF_TEXT)) {
+                    receiveBuffer[i+1] = NULL_BYTE;
                     i = maxIndex - 2; // End loop after next byte.
                 }
-            } else if (checkErrors) {
-                // On send, if last sent byte was not echoed correctly, send a BACKSPACE and roll back buffers.
-                error = lastSentByte != receiveBuffer[i];
-                if (error) {
-                    verboseLog(String("Error: exp: ") + String(char(lastSentByte)) + String(", got: ") + String(char(receiveBuffer[i])));
+            } else {
+                if (checkErrors) {
+                    // On send, if last sent byte was not echoed correctly, send a BACKSPACE and roll back buffers.
+                    error = lastSentByte != receiveBuffer[i];
+                    if (error) {
+                        verboseLog(String("Error: exp: ") + String(char(lastSentByte)) + String(", got: ") + String(char(receiveBuffer[i])));
+                    }
+                    if (error || (receiveBuffer[i] == BACKSPACE)) i--;
                 }
-                if (error || receiveBuffer[i] == BACKSPACE) i--;
+                lastSentByte = sendBuffer[i];
             }
-
-            lastSentByte = sendBuffer[i];
-            if (usDelay > 0) delayMicroseconds(usDelay);
         }
     } else {
         SPI.transferBytes(sendBuffer, receiveBuffer, sizeof(sendBuffer));
@@ -161,17 +150,13 @@ void transferSPIData(
     digitalWrite(D8, HIGH);
     digitalWrite(D2, LOW);
 
-    if (errorCount > maxErrorCount) {
-        Serial.println("Max error count was reached. Received:");
-        Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&receiveBuffer[1])));
-    } else {
-        // Don't print added control bytes.
-        if (!useNull) receiveBuffer[receivedDataSize - 2] = NULL_BYTE;
-
-        // Skip first byte as that's just noise.
-        Serial.println("Trimmed of noise and control bytes, received:");
-        Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&receiveBuffer[1])));
+    if (errorCount > maxErrorCount) Serial.println("Max error count was reached.");
+    uint16_t nonNullIndex;
+    for (nonNullIndex = 0; nonNullIndex < sizeof(receiveBuffer); nonNullIndex++) {
+        if (receiveBuffer[nonNullIndex] != NULL_BYTE) break;
     }
+    Serial.println("Skipping " + String(nonNullIndex) + " null byte(s), received:");
+    Serial.println(reinterpret_cast<const char*>(const_cast<const byte*>(&receiveBuffer[nonNullIndex])));
 }
 
 void serverGet() {

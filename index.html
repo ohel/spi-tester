@@ -41,19 +41,19 @@ button {
     <input type="checkbox" id="cbNull" name="cbNull">
     <label for="cbNull"> Use \0 instead of \x3\x4\0 for end of message control bytes.</label>
     <br>
-    <input type="number" id="nRate" name="nRate" min="1000" max="10000000" value="100000">
+    <input type="number" id="nRate" name="nRate" min="1000" max="10000000" value="10000">
     <label for="nRate"> Clock rate in Hz.</label>
     <br>
-    <input type="checkbox" id="cbLoop" name="cbLoop">
+    <input type="checkbox" id="cbLoop" name="cbLoop" checked>
     <label for="cbLoop"> Use loop to transfer single byte at a time.</label>
     <br>
-    <input type="number" id="nDelay" name="nDelay" min="0" max="1000" value="0">
+    <input type="number" id="nDelay" name="nDelay" min="0" max="1000" value="10">
     <label for="nDelay"> Delay for loop transfer, in µs.</label>
     <br>
-    <input type="checkbox" id="cbErrors" name="cbErrors" onclick="setCheckErrors()">
+    <input type="checkbox" id="cbErrors" name="cbErrors" checked onclick="setCheckErrors()">
     <label for="cbErrors"> Error checking.</label>
     <br>
-    <input type="checkbox" id="cbLeading" name="cbErrors" onclick="setLeadingNulls()">
+    <input type="checkbox" id="cbLeading" name="cbErrors" checked onclick="setLeadingNulls()">
     <label for="cbLeading"> Leading nulls on send.</label>
     <br>
     <input type="checkbox" id="cbGenerate" name="cbErrors" onclick="setGenerate()">
@@ -85,7 +85,6 @@ const setCheckErrors = () => {
         document.getElementById("cbLoop").checked = true;
         document.getElementById("cbLoop").disabled = true;
     } else if (document.getElementById("rbSend").checked) {
-        document.getElementById("cbLoop").checked = false;
         document.getElementById("cbLoop").disabled = false;
     }
 }
