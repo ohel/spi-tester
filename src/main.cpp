@@ -13,6 +13,7 @@ const uint maxErrorCount = 10;
 
 #define END_OF_TEXT '\x3'
 #define END_OF_TRANSMISSION '\x4'
+#define BELL '\x7'
 #define BACKSPACE '\b'
 #define NULL_BYTE '\0'
 
@@ -32,7 +33,8 @@ void transferSPIData(
     ulong rate = 100000,
     uint usDelay = 0,
     bool checkErrors = false,
-    bool leadingNulls = false) {
+    bool leadingNulls = false,
+    bool generateErrors = false) {
 
     if (!useNull) {
         data += END_OF_TEXT;
@@ -113,8 +115,10 @@ void transferSPIData(
                 if (usDelay > 0) delayMicroseconds(usDelay);
                 continue;
             } else {
-                receiveBuffer[i] = SPI.transfer(sendBuffer[lastSentByte == BACKSPACE ? i-1 : i]);
-                verboseLog("Sent: " + String(char(sendBuffer[lastSentByte == BACKSPACE ? i-1 : i])));
+                byte byteToSend = sendBuffer[lastSentByte == BACKSPACE ? i-1 : i];
+                if (generateErrors && (random(5) == 0)) byteToSend = BELL;
+                receiveBuffer[i] = SPI.transfer(byteToSend);
+                verboseLog("Sent: " + String(char(byteToSend)));
             }
 
             if (receiving) {
@@ -217,9 +221,13 @@ void serverPost() {
     body = body.substring(commaIndex+1);
     commaIndex = body.indexOf(',');
 
-    bool leadingNulls = body[0] == '1';
+    bool leadingNulls = body.substring(0, commaIndex)[0] == '1';
+    body = body.substring(commaIndex+1);
+    commaIndex = body.indexOf(',');
 
-    transferSPIData(data, isSending, useNull, useLoop, rate, usDelay, checkErrors, leadingNulls);
+    bool generateErrors = body[0] == '1';
+
+    transferSPIData(data, isSending, useNull, useLoop, rate, usDelay, checkErrors, leadingNulls, generateErrors);
 }
 
 void setup() {

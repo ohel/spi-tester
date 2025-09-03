@@ -55,6 +55,9 @@ button {
     <br>
     <input type="checkbox" id="cbLeading" name="cbErrors" onclick="setLeadingNulls()">
     <label for="cbLeading"> Leading nulls on send.</label>
+    <br>
+    <input type="checkbox" id="cbGenerate" name="cbErrors" onclick="setGenerate()">
+    <label for="cbGenerate"> Generate random byte errors.</label>
 </body>
 <script>
 const selectSend = () => {
@@ -63,6 +66,10 @@ const selectSend = () => {
     if (!document.getElementById("cbErrors").checked) {
         document.getElementById("cbLoop").checked = false;
         document.getElementById("cbLoop").disabled = false;
+        document.getElementById("cbLeading").checked = false;
+        document.getElementById("cbLeading").disabled = false;
+        document.getElementById("cbGenerate").checked = false;
+        document.getElementById("cbGenerate").disabled = false;
     }
 }
 
@@ -89,12 +96,13 @@ const submit = () => {
     const useLoop = document.getElementById("cbLoop").checked ? 1 : 0;
     const checkErrors = document.getElementById("cbErrors").checked ? 1 : 0;
     const leadingNulls = document.getElementById("cbLeading").checked ? 1 : 0;
+    const generate = document.getElementById("cbGenerate").checked ? 1 : 0;
     const rate = document.getElementById("nRate").value;
     const delay = document.getElementById("nDelay").value;
     const data = document.getElementById("data").value;
     fetch("/", {
         method: "POST",
-        body: `${isSending},${useNull},${rate},${useLoop},${delay},${checkErrors},${leadingNulls}:${data}`,
+        body: `${isSending},${useNull},${rate},${useLoop},${delay},${checkErrors},${leadingNulls},${generate}:${data}`,
         headers: {
             "Content-type": "text/plain; charset=UTF-8"
         }
