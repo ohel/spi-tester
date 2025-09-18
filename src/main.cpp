@@ -26,23 +26,24 @@ inline void verboseLog(String msg) {
 // 1 MHz clock results in 1 us bit length for nice 1 or 2 MHz sampling.
 // A 100 kHz clock is less error-prone and works better with bad wires.
 void transferSPIData(
-    String data,
-    bool isSending = true,
-    bool useNull = true,
-    bool useLoop = false,
-    ulong rate = 100000,
-    uint usDelay = 0,
-    bool checkErrors = false,
-    bool leadingNulls = false,
-    bool generateErrors = false) {
+    const String data,
+    const bool isSending = true,
+    const bool useNull = true,
+    const bool useLoop = false,
+    const ulong rate = 100000,
+    const uint usDelay = 0,
+    const bool checkErrors = false,
+    const bool leadingNulls = false,
+    const bool generateErrors = false) {
 
+    String localData = data;
     if (!useNull) {
-        data += END_OF_TEXT;
-        data += END_OF_TRANSMISSION;
+        localData += END_OF_TEXT;
+        localData += END_OF_TRANSMISSION;
     }
 
     // Account for null byte at the end and the first noise byte.
-    byte receiveBuffer[isSending ? (data.length() + 2) : maxBufferSize];
+    byte receiveBuffer[isSending ? (localData.length() + 2) : maxBufferSize];
     receiveBuffer[sizeof(receiveBuffer) - 1] = NULL_BYTE;
 
     if (useLoop) {
@@ -53,8 +54,8 @@ void transferSPIData(
         Serial.print("Transfer");
     }
     if (isSending) {
-        Serial.println(" " + String(data.length()) + " bytes" + (leadingNulls ? " + 5 leading nulls:" : ":"));
-        Serial.println(data);
+        Serial.println(" " + String(localData.length()) + " bytes" + (leadingNulls ? " + 5 leading nulls:" : ":"));
+        Serial.println(localData);
     } else {
         Serial.println(" until control bytes received.");
     }
@@ -62,7 +63,7 @@ void transferSPIData(
     Serial.println("Using clock rate: " + String(rate));
 
     byte sendBuffer[sizeof(receiveBuffer) - 1];
-    if (isSending) data.getBytes(sendBuffer, sizeof(receiveBuffer));
+    if (isSending) localData.getBytes(sendBuffer, sizeof(receiveBuffer));
     sendBuffer[sizeof(sendBuffer) - 1] = NULL_BYTE;
 
     bool receiving = !isSending;
@@ -175,8 +176,8 @@ void serverPost() {
     Serial.println(body);
 
     // Comma separates configuration parameters, colon the data.
-    uint colonIndex = body.indexOf(':');
-    const String data = body.substring(colonIndex+1);
+    int colonIndex = body.indexOf(':');
+    String data = body.substring(colonIndex+1);
     body = body.substring(0, colonIndex);
 
     // Order of configuration parameters:
@@ -210,9 +211,23 @@ void serverPost() {
     body = body.substring(commaIndex+1);
     commaIndex = body.indexOf(',');
 
-    bool generateErrors = body[0] == '1';
+    bool generateErrors = body.substring(0, commaIndex)[0] == '1';
+    body = body.substring(commaIndex+1);
+    commaIndex = body.indexOf(',');
 
-    transferSPIData(data, isSending, useNull, useLoop, rate, usDelay, checkErrors, leadingNulls, generateErrors);
+    bool splitToMultiple = body[0] == '1';
+
+    if (isSending && splitToMultiple) {
+        int newLineIndex = 0;
+        while (newLineIndex > -1) {
+            newLineIndex = data.indexOf('\n');
+            const String partData = data.substring(0, newLineIndex);
+            transferSPIData(partData, isSending, useNull, useLoop, rate, usDelay, checkErrors, leadingNulls, generateErrors);
+            data = data.substring(newLineIndex+1);
+        }
+    } else {
+        transferSPIData(data, isSending, useNull, useLoop, rate, usDelay, checkErrors, leadingNulls, generateErrors);
+    }
 }
 
 void setup() {
